@@ -317,9 +317,9 @@ public class NametagHandler implements Listener {
                 // View distance
                 metadata.add(new EntityData<>(17, EntityDataTypes.FLOAT, oneBlockViewDistance * blocks));
 
-                // Apply per-line vertical translation so lines have spacing while riding each other.
-                // Translation is in world units (blocks). Bottom line = 0, next = spacing, etc.
-                float yOffset = (float) ((i + 1) * lineSpacing);
+                // Every display rides the one below it, so the offset must stay constant.
+                // Increasing it per line makes the gaps accumulate and spreads the nametag apart.
+                float yOffset = (float) lineSpacing;
                 metadata.add(new EntityData<>(11, EntityDataTypes.VECTOR3F, new Vector3f(0f, yOffset, 0f)));
 
                 // Set the text content of this line (each line is its own display)
@@ -330,8 +330,8 @@ public class NametagHandler implements Listener {
                 }
                 metadata.add(new EntityData<>(23, EntityDataTypes.ADV_COMPONENT, lineText));
 
-                // Set background color to fully transparent (optional)
-                // metadata.add(new EntityData<>(25, EntityDataTypes.INT, 0));
+                // Remove the vanilla translucent rectangles behind every line.
+                metadata.add(new EntityData<>(25, EntityDataTypes.INT, 0));
 
                 WrapperPlayServerEntityMetadata metadataPacket = new WrapperPlayServerEntityMetadata(lineEntityId, metadata);
 

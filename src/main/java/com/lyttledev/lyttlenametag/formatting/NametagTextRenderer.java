@@ -10,8 +10,11 @@ import net.luckperms.api.LuckPerms;
 import net.luckperms.api.cacheddata.CachedMetaData;
 import net.luckperms.api.platform.PlayerAdapter;
 import org.bukkit.Location;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Player;
 
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
@@ -44,6 +47,8 @@ public final class NametagTextRenderer {
                 .resolver(Placeholder.unparsed("x", Integer.toString(location.getBlockX())))
                 .resolver(Placeholder.unparsed("y", Integer.toString(location.getBlockY())))
                 .resolver(Placeholder.unparsed("z", Integer.toString(location.getBlockZ())))
+                .resolver(Placeholder.unparsed("health", compactNumber(player.getHealth())))
+                .resolver(Placeholder.unparsed("max_health", compactNumber(maxHealth(player))))
                 .resolver(Placeholder.component("luckperms_prefix", luckPermsMeta(player, true)))
                 .resolver(Placeholder.component("luckperms_suffix", luckPermsMeta(player, false)))
                 .build();
@@ -64,12 +69,26 @@ public final class NametagTextRenderer {
         return input
                 .replaceAll("(?i)%luckperms_prefix%", "<luckperms_prefix>")
                 .replaceAll("(?i)%luckperms_suffix%", "<luckperms_suffix>")
+                .replaceAll("(?i)%player_health%", "<health>")
+                .replaceAll("(?i)%player_max_health%", "<max_health>")
                 .replace("<PLAYER>", "<player>")
                 .replace("<DISPLAYNAME>", "<displayname>")
                 .replace("<WORLD>", "<world>")
                 .replace("<X>", "<x>")
                 .replace("<Y>", "<y>")
                 .replace("<Z>", "<z>");
+    }
+
+    private double maxHealth(Player player) {
+        AttributeInstance attribute = player.getAttribute(Attribute.MAX_HEALTH);
+        return attribute == null ? 20.0D : attribute.getValue();
+    }
+
+    private String compactNumber(double value) {
+        if (value == Math.rint(value)) {
+            return Long.toString(Math.round(value));
+        }
+        return String.format(Locale.ROOT, "%.1f", value);
     }
 
     private Component luckPermsMeta(Player player, boolean prefix) {

@@ -93,6 +93,9 @@ Then use `<luckperms_prefix>` in `config.yml`. The older
 conversion is required. `<luckperms_suffix>` and `%luckperms_suffix%` are also
 supported.
 
+The built-in `<health>` and `<max_health>` placeholders read the values
+directly from the player and do not require PlaceholderAPI expansions.
+
 ---
 
 

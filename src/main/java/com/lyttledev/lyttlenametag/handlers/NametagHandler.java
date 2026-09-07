@@ -317,9 +317,9 @@ public class NametagHandler implements Listener {
                 // View distance
                 metadata.add(new EntityData<>(17, EntityDataTypes.FLOAT, oneBlockViewDistance * blocks));
 
-                // Every display rides the one below it, so the offset must stay constant.
-                // Increasing it per line makes the gaps accumulate and spreads the nametag apart.
-                float yOffset = (float) lineSpacing;
+                // Text-display passengers share the same base height, so every line needs
+                // its own increasing translation to form a readable vertical stack.
+                float yOffset = (float) ((i + 1) * lineSpacing);
                 metadata.add(new EntityData<>(11, EntityDataTypes.VECTOR3F, new Vector3f(0f, yOffset, 0f)));
 
                 // Set the text content of this line (each line is its own display)

@@ -24,7 +24,7 @@ interval: 0.5
 view_distance: 64
 
 # Vertical distance between nametag lines in blocks.
-line_spacing: 0.24
+line_spacing: 0.275
 
 # ⚠️ Do not change this value.
 config_version: 4

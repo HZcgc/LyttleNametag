@@ -1,41 +1,25 @@
 name: LyttleNametag
-description: Custom nametags plugin
+description: Modern multi-line nametags for TownyReborn
 version: ${version}
 main: com.lyttledev.lyttlenametag.LyttleNametag
-api-version: '1.21'
+api-version: '26.2'
 authors:
   - LyttleDevelopment
   - ThatsATim
   - Stualyttle
+  - HZcgc
 
 dependencies:
-    server:
-      PlaceholderAPI:
-        load: BEFORE
-        required: false
-        join-classpath: true
-      # Needed for Packet Events compatibility:
-      ProtocolLib:
-        load: BEFORE
-        required: false
-        join-classpath: true
-      ProtocolSupport:
-        load: BEFORE
-        required: false
-        join-classpath: true
-      ViaVersion:
-        load: BEFORE
-        required: false
-        join-classpath: true
-      ViaBackwards:
-        load: BEFORE
-        required: false
-        join-classpath: true
-      ViaRewind:
-        load: BEFORE
-        required: false
-        join-classpath: true
-      Geyser-Spigot:
-        load: BEFORE
-        required: false
-        join-classpath: true
+  server:
+    packetevents:
+      load: BEFORE
+      required: true
+      join-classpath: true
+    LuckPerms:
+      load: BEFORE
+      required: true
+      join-classpath: true
+    PlaceholderAPI:
+      load: BEFORE
+      required: true
+      join-classpath: true

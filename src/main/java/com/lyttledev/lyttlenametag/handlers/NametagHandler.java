@@ -12,10 +12,8 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEn
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetPassengers;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.lyttledev.lyttlenametag.LyttleNametag;
-import com.lyttledev.lyttleutils.types.Message.Replacements;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
-import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -64,7 +62,7 @@ public class NametagHandler implements Listener {
             timer.cancel();
         }
 
-        double interval = (double) plugin.config.general.get("interval");
+        double interval = Math.max(0.05D, plugin.config.general.getDouble("interval", 0.5D));
 
         // Periodic cleanup and update
         this.timer = new BukkitRunnable() {
@@ -199,21 +197,11 @@ public class NametagHandler implements Listener {
 
         org.bukkit.Location baseLoc = player.getLocation().clone();
         baseLoc.setY(baseLoc.getY() + nametagSpawnHeight);
-        World world = baseLoc.getWorld();
-
-        Replacements replacements = Replacements.builder()
-                .add("<PLAYER>", player.getName())
-                .add("<DISPLAYNAME>", player.displayName() != null ? player.displayName().toString() : player.getName())
-                .add("<WORLD>", world.getName())
-                .add("<X>", String.valueOf(baseLoc.getBlockX()))
-                .add("<Y>", String.valueOf(baseLoc.getBlockY()))
-                .add("<Z>", String.valueOf(baseLoc.getBlockZ()))
-                .build();
 
         // Render the nametag template into separate lines and chain them bottom-up (each line rides the previous one).
         // NOTE: We always allocate the full template line count to avoid re-spawn flicker on visibility toggles.
-        String nametagTemplate = (String) plugin.config.general.get("nametag");
-        List<Component> linesBottomUp = renderLinesBottomUp(nametagTemplate, replacements, player);
+        String nametagTemplate = plugin.config.general.getString("nametag", "<luckperms_prefix>\n<gray><player></gray>");
+        List<Component> linesBottomUp = renderLinesBottomUp(nametagTemplate, player, baseLoc);
 
         // Create entity IDs for each line (one Text Display per line)
         List<Integer> entityIds = new ArrayList<>(linesBottomUp.size());
@@ -248,12 +236,16 @@ public class NametagHandler implements Listener {
         }
     }
 
-    private List<Component> renderLinesBottomUp(String nametagTemplate, Replacements replacements, Player player) {
+    private List<Component> renderLinesBottomUp(
+            String nametagTemplate,
+            Player player,
+            org.bukkit.Location location
+    ) {
         // Split by newline, preserve trailing empty lines, then render each line separately
         String[] rawLines = nametagTemplate.split("\\R", -1);
         List<Component> topDown = new ArrayList<>(rawLines.length);
         for (String rawLine : rawLines) {
-            Component lineComponent = plugin.message.getMessageRaw(rawLine, replacements, player);
+            Component lineComponent = plugin.textRenderer.render(rawLine, player, location);
             topDown.add(lineComponent);
         }
         // Reverse to bottom-up so the last (often empty) line becomes the bottom-most rider
@@ -293,12 +285,11 @@ public class NametagHandler implements Listener {
             float blocksPerDefault = 80.0f;
             float oneBlockViewDistance = defaultViewDistance / blocksPerDefault;
 
-            int blocksConfig = (int) plugin.config.general.get("view_distance");
+            int blocksConfig = plugin.config.general.getInt("view_distance", 64);
             int blocks = blocksConfig > 0 ? blocksConfig : 64; // Default to 64 blocks if not set
 
             // Configurable line spacing in blocks (world units). Default ~0.275 blocks.
-            Object lineSpacingObj = plugin.config.general.get("line_spacing");
-            double lineSpacing = (lineSpacingObj instanceof Number) ? ((Number) lineSpacingObj).doubleValue() : 0.275D;
+            double lineSpacing = plugin.config.general.getDouble("line_spacing", 0.275D);
 
             // Create the spawn packet for each text display entity (one per line), bottom-up
             List<Integer> lineEntityIds = entity.getEntityIds();
@@ -370,24 +361,14 @@ public class NametagHandler implements Listener {
 
             org.bukkit.Location baseLoc = player.getLocation().clone();
             baseLoc.setY(baseLoc.getY() + nametagSpawnHeight);
-            World world = baseLoc.getWorld();
-
-            Replacements replacements = Replacements.builder()
-                    .add("<PLAYER>", player.getName())
-                    .add("<DISPLAYNAME>", player.displayName() != null ? player.displayName().toString() : player.getName())
-                    .add("<WORLD>", world.getName())
-                    .add("<X>", String.valueOf(baseLoc.getBlockX()))
-                    .add("<Y>", String.valueOf(baseLoc.getBlockY()))
-                    .add("<Z>", String.valueOf(baseLoc.getBlockZ()))
-                    .build();
 
             // When globally hidden (sneaking/invisible), keep entity count stable and set all lines to empty to avoid respawn flicker.
             List<Component> newLinesBottomUp;
             if (isGloballyHidden(player)) {
                 newLinesBottomUp = emptyLines(entity.getEntityIds().size());
             } else {
-                String nametagTemplate = (String) plugin.config.general.get("nametag");
-                List<Component> rendered = renderLinesBottomUp(nametagTemplate, replacements, player);
+                String nametagTemplate = plugin.config.general.getString("nametag", "<luckperms_prefix>\n<gray><player></gray>");
+                List<Component> rendered = renderLinesBottomUp(nametagTemplate, player, baseLoc);
                 // Normalize to the current entity count to avoid destroy/spawn
                 newLinesBottomUp = normalizeToSize(rendered, entity.getEntityIds().size());
             }
@@ -424,19 +405,9 @@ public class NametagHandler implements Listener {
         } else {
             org.bukkit.Location baseLoc = player.getLocation().clone();
             baseLoc.setY(baseLoc.getY() + nametagSpawnHeight);
-            World world = baseLoc.getWorld();
 
-            Replacements replacements = Replacements.builder()
-                    .add("<PLAYER>", player.getName())
-                    .add("<DISPLAYNAME>", player.displayName() != null ? player.displayName().toString() : player.getName())
-                    .add("<WORLD>", world.getName())
-                    .add("<X>", String.valueOf(baseLoc.getBlockX()))
-                    .add("<Y>", String.valueOf(baseLoc.getBlockY()))
-                    .add("<Z>", String.valueOf(baseLoc.getBlockZ()))
-                    .build();
-
-            String nametagTemplate = (String) plugin.config.general.get("nametag");
-            List<Component> rendered = renderLinesBottomUp(nametagTemplate, replacements, player);
+            String nametagTemplate = plugin.config.general.getString("nametag", "<luckperms_prefix>\n<gray><player></gray>");
+            List<Component> rendered = renderLinesBottomUp(nametagTemplate, player, baseLoc);
             target = normalizeToSize(rendered, entity.getEntityIds().size());
         }
 

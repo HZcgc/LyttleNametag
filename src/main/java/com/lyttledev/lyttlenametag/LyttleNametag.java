@@ -1,144 +1,110 @@
 package com.lyttledev.lyttlenametag;
 
-import com.github.retrooper.packetevents.PacketEvents;
-import com.github.retrooper.packetevents.PacketEventsAPI;
 import com.lyttledev.lyttlenametag.commands.LyttleNametagCommand;
+import com.lyttledev.lyttlenametag.formatting.NametagTextRenderer;
 import com.lyttledev.lyttlenametag.handlers.NametagHandler;
 import com.lyttledev.lyttlenametag.types.Configs;
-import com.lyttledev.lyttleutils.utils.communication.Console;
-import com.lyttledev.lyttleutils.utils.communication.Message;
-import com.lyttledev.lyttleutils.utils.storage.GlobalConfig;
-import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
-import com.github.retrooper.packetevents.settings.PacketEventsSettings;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
+import net.luckperms.api.LuckPerms;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
 
 public final class LyttleNametag extends JavaPlugin {
     public Configs config;
-    public Console console;
-    public Message message;
-    public GlobalConfig global;
     public NametagHandler nametagHandler;
-
-    @Override
-    public void onLoad() {
-        PacketEvents.setAPI(SpigotPacketEventsBuilder.build(this));
-        //On Bukkit, calling this here is essential, hence the name "load"
-        PacketEvents.getAPI().load();
-    }
+    public NametagTextRenderer textRenderer;
 
     @Override
     public void onEnable() {
-        initPacketEvents();
         saveDefaultConfig();
-        // Setup config after creating the configs
         this.config = new Configs(this);
-        this.global = new GlobalConfig(this);
-        // Migrate config
         migrateConfig();
 
-        // Plugin startup logic
-        this.console = new Console(this);
-        this.message = new Message(this, config.messages, global);
+        RegisteredServiceProvider<LuckPerms> luckPermsRegistration =
+                getServer().getServicesManager().getRegistration(LuckPerms.class);
+        if (luckPermsRegistration == null) {
+            getLogger().severe("LuckPerms is required, but its API is unavailable.");
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
 
-        // Register commands
-        LifecycleEventManager<Plugin> manager = this.getLifecycleManager();
+        this.textRenderer = new NametagTextRenderer(luckPermsRegistration.getProvider());
+
+        LifecycleEventManager<Plugin> manager = getLifecycleManager();
         manager.registerEventHandler(LifecycleEvents.COMMANDS, event -> {
-            final Commands commands = event.registrar();
-            this.registerCommands(commands);
+            Commands commands = event.registrar();
+            registerCommands(commands);
         });
 
-        // Handlers
         this.nametagHandler = new NametagHandler(this);
+        getLogger().info("Enabled with external PacketEvents and native LuckPerms MiniMessage prefix support.");
     }
 
     public void registerCommands(Commands commands) {
         LyttleNametagCommand.createCommand(this, commands);
     }
 
-    private void initPacketEvents() {
-        // Get the PacketEvents API instance
-        PacketEventsAPI<?> instance = PacketEvents.getAPI();
-        // Configure PacketEvents settings
-        PacketEventsSettings settings = instance.getSettings();
-        // Disable update check and debug mode
-        settings.checkForUpdates(false);
-        // Disable debug mode
-        settings.debug(false);
-
-        // Initialize PacketEvents
-        instance.init();
+    public void reloadPlugin() {
+        config.reload();
+        migrateConfig();
+        nametagHandler.reload();
     }
 
     @Override
     public void onDisable() {
-        this.nametagHandler.removeAllNametagsOnShutdown();
-        PacketEvents.getAPI().terminate();
+        if (nametagHandler != null) {
+            nametagHandler.removeAllNametagsOnShutdown();
+        }
+        // PacketEvents is an external dependency and owns its own lifecycle.
     }
 
     @Override
     public void saveDefaultConfig() {
-        String configPath = "config.yml";
-        if (!new File(getDataFolder(), configPath).exists())
-            saveResource(configPath, false);
+        saveResourceIfMissing("config.yml");
+        saveResourceIfMissing("messages.yml");
+        saveResource("#defaults/config.yml", true);
+        saveResource("#defaults/messages.yml", true);
+    }
 
-        String messagesPath = "messages.yml";
-        if (!new File(getDataFolder(), messagesPath).exists())
-            saveResource(messagesPath, false);
-
-        // Defaults:
-        String defaultPath = "#defaults/";
-        String defaultGeneralPath =  defaultPath + configPath;
-        saveResource(defaultGeneralPath, true);
-
-        String defaultMessagesPath =  defaultPath + messagesPath;
-        saveResource(defaultMessagesPath, true);
+    private void saveResourceIfMissing(String path) {
+        if (!new File(getDataFolder(), path).exists()) {
+            saveResource(path, false);
+        }
     }
 
     private void migrateConfig() {
-        if (!config.general.contains("config_version")) {
-            config.general.set("config_version", 0);
+        int version = config.general.getInt("config_version", 0);
+
+        if (version < 1) {
+            String oldNametag = config.messages.getString("nametag");
+            if (oldNametag != null) {
+                config.general.set("nametag", oldNametag);
+                config.messages.set("nametag", null);
+            }
+            version = 1;
+        }
+        if (version < 2) {
+            config.general.set("interval", config.defaultGeneral.getDouble("interval", 0.5D));
+            version = 2;
+        }
+        if (version < 3) {
+            config.general.set("view_distance", config.defaultGeneral.getInt("view_distance", 64));
+            version = 3;
+        }
+        if (version < 4) {
+            if (!config.general.contains("line_spacing")) {
+                config.general.set("line_spacing", config.defaultGeneral.getDouble("line_spacing", 0.275D));
+            }
+            version = 4;
         }
 
-        switch (config.general.get("config_version").toString()) {
-            case "0":
-                // Migrate config entries.
-                config.general.set("nametag", config.messages.get("nametag"));
-                config.messages.remove("nametag");
-
-                // Update config version.
-                config.general.set("config_version", 1);
-
-                // Recheck if the config is fully migrated.
-                migrateConfig();
-                break;
-            case "1":
-                // Migrate config entries.
-                config.general.set("interval", config.defaultGeneral.get("interval"));
-
-                // Update config version.
-                config.general.set("config_version", 2);
-
-                // Recheck if the config is fully migrated.
-                migrateConfig();
-                break;
-            case "2":
-                // Migrate config entries.
-                config.general.set("view_distance", config.defaultGeneral.get("view_distance"));
-
-                // Update config version.
-                config.general.set("config_version", 3);
-
-                // Recheck if the config is fully migrated.
-                migrateConfig();
-                break;
-            default:
-                break;
-        }
+        config.general.set("config_version", version);
+        config.saveGeneral();
+        config.saveMessages();
     }
 }

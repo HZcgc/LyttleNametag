@@ -9,12 +9,15 @@
 # ###################################################
 
 # nametag
+# LuckPerms prefixes are parsed as MiniMessage components. You can paste a
+# Birdflop prefix such as <gradient:#ff4fa3:#55ff55><bold>OWNER</bold></gradient>
+# directly into LuckPerms and use <luckperms_prefix> here.
 nametag: |-
-  <gray>%luckperms_prefix%</gray>
-  <gray><PLAYER></gray>
+  <luckperms_prefix>
+  <gray><player></gray>
   <dark_gray>@</dark_gray>
   <yellow>%vault_eco_balance_formatted%</yellow> <gold>Tokens</gold>
-  <red>🖤 %math_0:0_({player_health})%<dark_grey>/20
+  <red>🖤 %math_0:0_({player_health})%<dark_gray>/20
 
 # Interval in seconds for checking updates.
 interval: 0.5
@@ -22,5 +25,8 @@ interval: 0.5
 # The maximum distance at which the nametag will be visible. (In blocks) (default: 64)
 view_distance: 64
 
+# Vertical distance between nametag lines in blocks.
+line_spacing: 0.275
+
 # ⚠️ Do not change this value.
-config_version: 3
+config_version: 4

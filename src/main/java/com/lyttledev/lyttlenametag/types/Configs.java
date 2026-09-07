@@ -1,40 +1,64 @@
 package com.lyttledev.lyttlenametag.types;
 
 import com.lyttledev.lyttlenametag.LyttleNametag;
-import com.lyttledev.lyttleutils.types.YamlConfig;
+import org.bukkit.configuration.file.YamlConfiguration;
 
-public class Configs {
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+
+public final class Configs {
     private final LyttleNametag plugin;
+    private final File generalFile;
+    private final File messagesFile;
 
-    // Configs
-    public YamlConfig general;
-    public YamlConfig messages;
-
-    // Default configs
-    public YamlConfig defaultGeneral;
-    public YamlConfig defaultMessages;
-
+    public YamlConfiguration general;
+    public YamlConfiguration messages;
+    public YamlConfiguration defaultGeneral;
+    public YamlConfiguration defaultMessages;
 
     public Configs(LyttleNametag plugin) {
         this.plugin = plugin;
-
-        // Configs
-        general = new YamlConfig(plugin, "config.yml");
-        messages = new YamlConfig(plugin, "messages.yml");
-
-        // Default configs
-        defaultGeneral = new YamlConfig(plugin, "#defaults/config.yml");
-        defaultMessages = new YamlConfig(plugin, "#defaults/messages.yml");
+        this.generalFile = new File(plugin.getDataFolder(), "config.yml");
+        this.messagesFile = new File(plugin.getDataFolder(), "messages.yml");
+        reload();
     }
 
     public void reload() {
-        general.reload();
-        messages.reload();
-
-        plugin.reloadConfig();
+        general = YamlConfiguration.loadConfiguration(generalFile);
+        messages = YamlConfiguration.loadConfiguration(messagesFile);
+        defaultGeneral = loadBundledConfig("#defaults/config.yml");
+        defaultMessages = loadBundledConfig("#defaults/messages.yml");
     }
 
-    private String getConfigPath(String path) {
-        return plugin.getConfig().getString("configs." + path);
+    public void saveGeneral() {
+        save(general, generalFile);
+    }
+
+    public void saveMessages() {
+        save(messages, messagesFile);
+    }
+
+    private YamlConfiguration loadBundledConfig(String path) {
+        InputStream stream = plugin.getResource(path);
+        if (stream == null) {
+            throw new IllegalStateException("Missing bundled configuration: " + path);
+        }
+
+        try (InputStreamReader reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
+            return YamlConfiguration.loadConfiguration(reader);
+        } catch (IOException exception) {
+            throw new IllegalStateException("Unable to read bundled configuration: " + path, exception);
+        }
+    }
+
+    private void save(YamlConfiguration configuration, File destination) {
+        try {
+            configuration.save(destination);
+        } catch (IOException exception) {
+            plugin.getLogger().severe("Unable to save " + destination.getName() + ": " + exception.getMessage());
+        }
     }
 }

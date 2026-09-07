@@ -35,14 +35,14 @@ public class LyttleNametagCommand {
     private static int rootNode(CommandContext<CommandSourceStack> context) {
         CommandSender sender = context.getSource().getSender();
         Component version = Component.text("Plugin version: " + plugin.getDescription().getVersion());
-        plugin.message.sendMessageRaw(sender, version);
+        sender.sendMessage(version);
         return Command.SINGLE_SUCCESS;
     }
 
     private static int reloadNode(CommandContext<CommandSourceStack> context) {
         final CommandSender sender = context.getSource().getSender();
-        plugin.config.reload();
-        plugin.message.sendMessageRaw(sender, Component.text("The config has been reloaded"));
+        plugin.reloadPlugin();
+        sender.sendMessage(Component.text("LyttleNametag configuration and nametags reloaded."));
         return Command.SINGLE_SUCCESS;
     }
 }

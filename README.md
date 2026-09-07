@@ -2,7 +2,7 @@
   
 # LyttleNametag
 
-[![Paper](https://img.shields.io/badge/Paper-1.21.x-blue)](https://papermc.io)
+[![Paper](https://img.shields.io/badge/Paper-26.2-blue)](https://papermc.io)
 [![Hangar](https://img.shields.io/badge/Hangar-download-success)](https://hangar.papermc.io/Lyttle-Development)
 [![Discord](https://img.shields.io/discord/941334383216967690?color=7289DA&label=Discord&logo=discord&logoColor=ffffff)](https://discord.gg/QfqFFPFFQZ)
 
@@ -22,8 +22,10 @@
 
 ### 🎯 Core Plugin Features
 - Multi line nametags
-- Colors & formatting support
+- Native MiniMessage, RGB and Birdflop gradient support
+- Direct LuckPerms prefix and suffix components
 - PlaceholderAPI integration
+- Uses the server's current PacketEvents installation instead of shading an outdated copy
 
 ---
 
@@ -56,7 +58,7 @@
 ## 📥 Installation
 
 ### Quick Start
-1. Download the latest version from [Hangar](https://hangar.papermc.io/Lyttle-Development/LyttleNametag)
+1. Download the latest JAR from this fork's GitHub Actions or Releases page
 2. Place the `.jar` file in your server's `plugins` folder
 3. Restart your server
 4. Edit the configuration file to customize the plugin to your needs
@@ -66,15 +68,30 @@
 
 
 ### 📋 Requirements
-- Java 21 or newer
-- Paper 1.21.x+
+- Java 25
+- Paper 26.2
 - Minimum 20MB free disk space
 
 ---
 
 
 ### 💫 Dependencies
-- [PlaceholderAPI](https://hangar.papermc.io/HelpChat/PlaceholderAPI) (for dynamic content)
+- PacketEvents 2.13.0+
+- LuckPerms 5.5+
+- PlaceholderAPI 2.12.3+
+
+### 🎨 LuckPerms gradients
+
+Store the prefix directly in LuckPerms as MiniMessage, for example:
+
+```text
+<gradient:#ff4fa3:#55ff55><bold>OWNER</bold></gradient><reset>
+```
+
+Then use `<luckperms_prefix>` in `config.yml`. The older
+`%luckperms_prefix%` placeholder remains compatible, but no legacy `&` color
+conversion is required. `<luckperms_suffix>` and `%luckperms_suffix%` are also
+supported.
 
 ---
 

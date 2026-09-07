@@ -3,6 +3,7 @@ package com.lyttledev.lyttlenametag;
 import com.lyttledev.lyttlenametag.commands.LyttleNametagCommand;
 import com.lyttledev.lyttlenametag.formatting.NametagTextRenderer;
 import com.lyttledev.lyttlenametag.handlers.NametagHandler;
+import com.lyttledev.lyttlenametag.handlers.VanillaNametagHider;
 import com.lyttledev.lyttlenametag.types.Configs;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager;
@@ -17,6 +18,7 @@ import java.io.File;
 public final class LyttleNametag extends JavaPlugin {
     public Configs config;
     public NametagHandler nametagHandler;
+    public VanillaNametagHider vanillaNametagHider;
     public NametagTextRenderer textRenderer;
 
     @Override
@@ -42,6 +44,7 @@ public final class LyttleNametag extends JavaPlugin {
         });
 
         this.nametagHandler = new NametagHandler(this);
+        this.vanillaNametagHider = new VanillaNametagHider(this);
         getLogger().info("Enabled with external PacketEvents and native LuckPerms MiniMessage prefix support.");
     }
 
@@ -53,10 +56,14 @@ public final class LyttleNametag extends JavaPlugin {
         config.reload();
         migrateConfig();
         nametagHandler.reload();
+        vanillaNametagHider.reload();
     }
 
     @Override
     public void onDisable() {
+        if (vanillaNametagHider != null) {
+            vanillaNametagHider.shutdown();
+        }
         if (nametagHandler != null) {
             nametagHandler.removeAllNametagsOnShutdown();
         }
@@ -101,6 +108,15 @@ public final class LyttleNametag extends JavaPlugin {
                 config.general.set("line_spacing", config.defaultGeneral.getDouble("line_spacing", 0.275D));
             }
             version = 4;
+        }
+        if (version < 5) {
+            if (!config.general.contains("hide_vanilla_nametag")) {
+                config.general.set(
+                        "hide_vanilla_nametag",
+                        config.defaultGeneral.getBoolean("hide_vanilla_nametag", true)
+                );
+            }
+            version = 5;
         }
 
         config.general.set("config_version", version);

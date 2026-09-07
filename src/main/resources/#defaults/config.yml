@@ -26,5 +26,9 @@ view_distance: 64
 # Vertical distance between nametag lines in blocks.
 line_spacing: 0.275
 
+# Hide Minecraft's original player nametag so it does not overlap the custom
+# rank, name and health lines. Citizens NPCs are ignored.
+hide_vanilla_nametag: true
+
 # ⚠️ Do not change this value.
-config_version: 4
+config_version: 5

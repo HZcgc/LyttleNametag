@@ -25,6 +25,8 @@
 - Native MiniMessage, RGB and Birdflop gradient support
 - Direct LuckPerms prefix and suffix components
 - PlaceholderAPI integration
+- Built-in vanilla nametag hiding, including scoreboard re-sync for hub plugins
+- Citizens NPCs are excluded from vanilla player nametag handling
 - Uses the server's current PacketEvents installation instead of shading an outdated copy
 
 ---
@@ -95,6 +97,11 @@ supported.
 
 The built-in `<health>` and `<max_health>` placeholders read the values
 directly from the player and do not require PlaceholderAPI expansions.
+
+Set `hide_vanilla_nametag: true` to suppress Minecraft's original player name
+and prevent it from overlapping the custom rank, name and health lines. The
+hidden team is synchronized with scoreboards assigned by hub plugins, while
+Citizens NPCs are ignored.
 
 ---
 

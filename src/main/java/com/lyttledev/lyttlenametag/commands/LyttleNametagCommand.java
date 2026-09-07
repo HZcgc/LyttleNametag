@@ -34,7 +34,7 @@ public class LyttleNametagCommand {
 
     private static int rootNode(CommandContext<CommandSourceStack> context) {
         CommandSender sender = context.getSource().getSender();
-        Component version = Component.text("Plugin version: " + plugin.getDescription().getVersion());
+        Component version = Component.text("Plugin version: " + plugin.getPluginMeta().getVersion());
         sender.sendMessage(version);
         return Command.SINGLE_SUCCESS;
     }

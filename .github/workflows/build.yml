@@ -2,11 +2,13 @@ name: Build TownyReborn fork
 
 on:
   push:
+    branches: [ main ]
   pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -33,3 +35,18 @@ jobs:
           name: LyttleNametag-Paper-26.2
           path: build/libs/LyttleNametag-*.jar
           if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v1.4.0-townyreborn.4
+          JAR: build/libs/LyttleNametag-1.4.0-townyreborn.4.jar
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$JAR" --clobber
+          else
+            gh release create "$TAG" "$JAR" \
+              --title "LyttleNametag 1.4.0-townyreborn.4" \
+              --generate-notes
+          fi

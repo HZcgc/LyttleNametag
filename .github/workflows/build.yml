@@ -40,13 +40,13 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v1.4.0-townyreborn.4
-          JAR: build/libs/LyttleNametag-1.4.0-townyreborn.4.jar
+          TAG: v1.4.0-townyreborn.5
+          JAR: build/libs/LyttleNametag-1.4.0-townyreborn.5.jar
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$JAR" --clobber
           else
             gh release create "$TAG" "$JAR" \
-              --title "LyttleNametag 1.4.0-townyreborn.4" \
+              --title "LyttleNametag 1.4.0-townyreborn.5" \
               --generate-notes
           fi

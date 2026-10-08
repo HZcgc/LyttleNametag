@@ -1,6 +1,10 @@
 package com.lyttledev.lyttlenametag.handlers;
 
 import com.github.retrooper.packetevents.PacketEvents;
+import com.github.retrooper.packetevents.event.PacketListenerAbstract;
+import com.github.retrooper.packetevents.event.PacketListenerPriority;
+import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityData;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes;
 import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
@@ -12,10 +16,13 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEn
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetPassengers;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.lyttledev.lyttlenametag.LyttleNametag;
+import io.papermc.paper.event.player.PlayerTrackEntityEvent;
+import io.papermc.paper.event.player.PlayerUntrackEntityEvent;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityPotionEffectEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -25,9 +32,11 @@ import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -41,13 +50,36 @@ public class NametagHandler implements Listener {
     private BukkitTask visibilityTimer; // Fast, lightweight visibility enforcement (vanish/world) without flicker
     private final Map<UUID, Map<UUID, Boolean>> viewerVisibility = new ConcurrentHashMap<>(); // viewer -> (owner -> visible)
     private final double nametagSpawnHeight = 1.8; // Height above player's head for nametag
+    private final NametagPassengers passengers = new NametagPassengers();
+    private final PacketListenerAbstract passengerListener;
 
     public NametagHandler(LyttleNametag plugin) {
+        this(plugin, true);
+    }
+
+    NametagHandler(LyttleNametag plugin, boolean startTasks) {
         this.plugin = plugin;
-        plugin.getServer().getPluginManager().registerEvents(this, plugin);
-        startTimer();
-        startHardReloadTimer();
-        startVisibilityTimer();
+        this.passengerListener = new PacketListenerAbstract(PacketListenerPriority.HIGHEST) {
+            @Override
+            public void onPacketSend(PacketSendEvent event) {
+                if (event.isCancelled() || event.getPacketType() != PacketType.Play.Server.SET_PASSENGERS) return;
+                UUID viewer = event.getUser().getUUID();
+                if (viewer == null) return;
+                WrapperPlayServerSetPassengers packet = new WrapperPlayServerSetPassengers(event);
+                int[] rewritten = passengers.rewrite(viewer, packet.getEntityId(), packet.getPassengers());
+                if (!Arrays.equals(rewritten, packet.getPassengers())) {
+                    packet.setPassengers(rewritten);
+                    event.markForReEncode(true);
+                }
+            }
+        };
+        if (startTasks) {
+            PacketEvents.getAPI().getEventManager().registerListener(passengerListener);
+            plugin.getServer().getPluginManager().registerEvents(this, plugin);
+            startTimer();
+            startHardReloadTimer();
+            startVisibilityTimer();
+        }
     }
 
     public void reload() {
@@ -95,9 +127,18 @@ public class NametagHandler implements Listener {
             visibilityTimer.cancel();
         }
         this.visibilityTimer = new BukkitRunnable() {
+            private int cycles;
             @Override
             public void run() {
                 enforceVisibilityMatrix();
+                // Client movement follows the player directly. A small mount
+                // refresh repairs an external detach without recreating text.
+                if (++cycles % 4 == 0) {
+                    for (Player owner : Bukkit.getOnlinePlayers()) {
+                        NametagEntity entity = playerNametags.get(owner.getUniqueId());
+                        if (entity != null) resendPassengers(owner, entity);
+                    }
+                }
             }
         }.runTaskTimer(plugin, 0L, 5L); // ~0.25s
     }
@@ -105,11 +146,12 @@ public class NametagHandler implements Listener {
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (!event.getPlayer().isOnline()) return;
             spawnNametag(event.getPlayer());
             for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
                 if (onlinePlayer.equals(event.getPlayer())) continue;
                 // Only show nametags of players in the same world as the joining player and that the viewer can see
-                if (!sameWorld(onlinePlayer, event.getPlayer()) || !event.getPlayer().canSee(onlinePlayer)) {
+                if (shouldHideForViewer(onlinePlayer, event.getPlayer())) {
                     NametagEntity e = playerNametags.get(onlinePlayer.getUniqueId());
                     if (e != null) {
                         sendDestroyToViewer(event.getPlayer(), e.getEntityIds());
@@ -119,60 +161,78 @@ public class NametagHandler implements Listener {
                     continue;
                 }
                 showNametagToPlayer(onlinePlayer, event.getPlayer());
-                // Update cache as visible
-                setLastVisibility(event.getPlayer(), onlinePlayer, true);
             }
         }, 10L);
-        // Hard reload on join
-        reloadTimeOut();
     }
 
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         // Clear this player as a viewer from the visibility cache
         clearViewerFromVisibilityCache(event.getPlayer().getUniqueId());
+        passengers.removeViewer(event.getPlayer().getUniqueId());
         removeNametag(event.getPlayer());
-        // Hard reload on quit
-        reloadTimeOut();
     }
 
     @EventHandler
     public void onPlayerDeath(PlayerDeathEvent event) {
-        // Hard reload on death (after death event to ensure state is correct)
-        reloadTimeOut();
+        removeNametag(event.getPlayer());
     }
 
     @EventHandler
     public void onPlayerRespawn(PlayerRespawnEvent event) {
-        // Hard reload on respawn (after respawn so location is correct)
-        reloadTimeOut();
+        refreshAfterTransition(event.getPlayer(), true);
     }
 
     @EventHandler
     public void onPlayerChangedWorld(PlayerChangedWorldEvent event) {
-        // Hard reload on world change
-        reloadTimeOut();
+        refreshAfterTransition(event.getPlayer(), true);
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerTeleport(PlayerTeleportEvent event) {
-        // Hard reload on teleport (after teleport)
-        reloadTimeOut();
+        refreshAfterTransition(event.getPlayer(), false);
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerGameModeChange(PlayerGameModeChangeEvent event) {
-        // Hard reload on game mode change (after change)
-        reloadTimeOut();
+        refreshAfterTransition(event.getPlayer(), false);
     }
 
-    // Instant, no-delay update on toggle sneak to avoid flicker and slowness
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlayerTrackEntity(PlayerTrackEntityEvent event) {
+        if (!(event.getEntity() instanceof Player owner) || owner.hasMetadata("NPC")) return;
+        Player viewer = event.getPlayer();
+        // The real player's spawn packet must arrive before any mount packet.
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (shouldHideForViewer(owner, viewer)) return;
+            NametagEntity entity = playerNametags.get(owner.getUniqueId());
+            if (entity == null) {
+                spawnNametag(owner);
+            } else {
+                sendDestroyToViewer(viewer, entity.getEntityIds());
+                setLastVisibility(viewer, owner, false);
+                showNametagToPlayer(owner, viewer);
+            }
+        }, 1L);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerUntrackEntity(PlayerUntrackEntityEvent event) {
+        if (!(event.getEntity() instanceof Player owner)) return;
+        NametagEntity entity = playerNametags.get(owner.getUniqueId());
+        if (entity == null) return;
+        hideNametagFromViewer(owner, event.getPlayer(), entity, false);
+        passengers.untrack(event.getPlayer().getUniqueId(), entity.ownerEntityId);
+    }
+
+    // Pose changes update existing text rather than recreate display entities.
     @EventHandler
     public void onPlayerToggleSneak(PlayerToggleSneakEvent event) {
-        // Update nametag in-place (metadata only), do NOT trigger reload/destroy/spawn
-        updateOwnerVisibilityNametag(event.getPlayer());
-        // Also enforce visibility immediately (in case vanish plugins interact with sneak)
-        enforceVisibilityMatrix();
+        // Bukkit applies the new pose after this event, so read it next tick.
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            updateOwnerVisibilityNametag(event.getPlayer());
+            enforceVisibilityMatrix();
+        });
     }
 
     // Instant update when invisibility potion is applied/removed
@@ -187,18 +247,33 @@ public class NametagHandler implements Listener {
         });
     }
 
-    private void reloadTimeOut() {
-        // Run the reloadNametags method after a delay
-        Bukkit.getScheduler().runTaskLater(plugin, this::reloadNametags, 20L); // 20 ticks = 1 second
+    private void refreshAfterTransition(Player player, boolean resetViewer) {
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (!player.isOnline()) return;
+            if (resetViewer) {
+                Map<UUID, Boolean> seen = viewerVisibility.get(player.getUniqueId());
+                if (seen != null) seen.forEach((ownerId, visible) -> {
+                    NametagEntity entity = playerNametags.get(ownerId);
+                    if (visible && entity != null) sendDestroyToViewer(player, entity.getEntityIds());
+                });
+                clearViewerFromVisibilityCache(player.getUniqueId());
+                passengers.removeViewer(player.getUniqueId());
+            }
+            NametagEntity entity = playerNametags.get(player.getUniqueId());
+            if (entity == null || entity.ownerEntityId != player.getEntityId()) spawnNametag(player);
+            else resendPassengers(player, entity);
+            enforceVisibilityMatrix();
+        }, 2L);
     }
 
     private void spawnNametag(Player player) {
         removeNametag(player);
+        if (!player.isOnline() || player.isDead() || player.hasMetadata("NPC")) return;
 
         org.bukkit.Location baseLoc = player.getLocation().clone();
         baseLoc.setY(baseLoc.getY() + nametagSpawnHeight);
 
-        // Render the nametag template into separate lines and chain them bottom-up (each line rides the previous one).
+        // Render bottom-up; every line rides the player and uses its own translation.
         // NOTE: We always allocate the full template line count to avoid re-spawn flicker on visibility toggles.
         String nametagTemplate = plugin.config.general.getString("nametag", "<luckperms_prefix>\n<gray><player></gray>");
         List<Component> linesBottomUp = renderLinesBottomUp(nametagTemplate, player, baseLoc);
@@ -210,18 +285,19 @@ public class NametagHandler implements Listener {
         }
 
         NametagEntity nametagEntity = new NametagEntity(
+                player.getEntityId(),
                 entityIds,
                 linesBottomUp
         );
 
         playerNametags.put(player.getUniqueId(), nametagEntity);
+        passengers.register(player.getEntityId(), entityIds.stream().mapToInt(Integer::intValue).toArray());
 
         for (Player viewer : Bukkit.getOnlinePlayers()) {
             if (!viewer.equals(player)) {
                 // Only show to viewers in the same world who can see the player (not vanished for them)
                 if (!shouldHideForViewer(player, viewer)) {
                     showNametagToPlayer(player, viewer);
-                    setLastVisibility(viewer, player, true);
                 } else {
                     // Ensure it's hidden for non-eligible viewers
                     sendDestroyToViewer(viewer, nametagEntity.getEntityIds());
@@ -260,8 +336,7 @@ public class NametagHandler implements Listener {
 
         // Only show if owner and viewer are in the same world and viewer can see owner; otherwise ensure it's destroyed for this viewer
         if (shouldHideForViewer(owner, viewer)) {
-            sendDestroyToViewer(viewer, entity.getEntityIds());
-            setLastVisibility(viewer, owner, false);
+            hideNametagFromViewer(owner, viewer, entity, true);
             return;
         }
 
@@ -339,17 +414,22 @@ public class NametagHandler implements Listener {
                 PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, metadataPacket);
             }
 
-            // Chain passengers: start from the owner, then each line rides the previous one (bottom-up)
-            int parentId = ownerId;
-            for (int lineEntityId : lineEntityIds) {
-                WrapperPlayServerSetPassengers passengersPacket = new WrapperPlayServerSetPassengers(parentId, new int[]{lineEntityId});
-                PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, passengersPacket);
-                parentId = lineEntityId; // next line rides this line
-            }
+            // Every line rides the PLAYER directly; translations supply line
+            // spacing. Never overwrite real or other plugins' passengers.
+            int[] mounted = passengers.show(viewer.getUniqueId(), ownerId,
+                    owner.getPassengers().stream().mapToInt(org.bukkit.entity.Entity::getEntityId).toArray());
+            PacketEvents.getAPI().getPlayerManager().sendPacket(viewer,
+                    new WrapperPlayServerSetPassengers(ownerId, mounted));
 
             // Mark as visible for this viewer-owner pair
             setLastVisibility(viewer, owner, true);
         } catch (Exception e) {
+            passengers.hide(viewer.getUniqueId(), ownerId);
+            setLastVisibility(viewer, owner, false);
+            // A partial spawn must not be cached as visible: the visibility
+            // loop can retry this viewer without a plugin reload.
+            try { sendDestroyToViewer(viewer, entity.getEntityIds()); }
+            catch (Exception cleanup) { e.addSuppressed(cleanup); }
             plugin.getLogger().severe("Error showing nametag: " + e.getMessage());
         }
     }
@@ -426,7 +506,7 @@ public class NametagHandler implements Listener {
         sendNametagTextUpdate(player, entity);
     }
 
-    // Non-destructive periodic refresh: re-apply text state and passenger chains without destroy/spawn.
+    // Non-destructive periodic refresh: re-apply text state and mounts without destroy/spawn.
     private void softRefreshNametags() {
         cleanupOrphans();
         for (Player owner : Bukkit.getOnlinePlayers()) {
@@ -438,13 +518,16 @@ public class NametagHandler implements Listener {
             }
             // Re-apply current visibility state instantly (metadata only)
             updateOwnerVisibilityNametag(owner);
-            // Re-send passenger chain to ensure client keeps the riding hierarchy, scoped per-world and per-visibility
-            resendPassengerChain(owner, entity);
+            resendPassengers(owner, entity);
         }
     }
 
     // Enforce per-viewer visibility transitions (spawn/destroy) based on world and vanish state.
     private void enforceVisibilityMatrix() {
+        for (Player owner : Bukkit.getOnlinePlayers()) {
+            if (!playerNametags.containsKey(owner.getUniqueId()) && owner.isOnline() && !owner.isDead()
+                    && !owner.hasMetadata("NPC")) spawnNametag(owner);
+        }
         // Iterate owners with nametags
         for (Map.Entry<UUID, NametagEntity> entry : playerNametags.entrySet()) {
             UUID ownerId = entry.getKey();
@@ -452,46 +535,50 @@ public class NametagHandler implements Listener {
             if (owner == null || !owner.isOnline()) continue;
 
             NametagEntity entity = entry.getValue();
-            List<Integer> ids = entity.getEntityIds();
+            Set<Player> tracked = owner.getTrackedBy();
 
             for (Player viewer : Bukkit.getOnlinePlayers()) {
                 if (viewer.getUniqueId().equals(ownerId)) continue;
 
-                boolean desiredVisible = !shouldHideForViewer(owner, viewer);
+                boolean desiredVisible = !shouldHideForViewer(owner, viewer, tracked);
                 boolean lastVisible = getLastVisibility(viewer, owner);
 
                 if (desiredVisible && !lastVisible) {
                     // Spawn to this viewer now
                     showNametagToPlayer(owner, viewer);
-                    setLastVisibility(viewer, owner, true);
                 } else if (!desiredVisible && lastVisible) {
                     // Destroy for this viewer now
-                    sendDestroyToViewer(viewer, ids);
-                    setLastVisibility(viewer, owner, false);
+                    hideNametagFromViewer(owner, viewer, entity, true);
                 }
             }
         }
     }
 
-    private void resendPassengerChain(Player owner, NametagEntity entity) {
-        int parentId = owner.getEntityId();
-        for (int lineEntityId : entity.getEntityIds()) {
-            WrapperPlayServerSetPassengers passengersPacket = new WrapperPlayServerSetPassengers(parentId, new int[]{lineEntityId});
-            for (Player viewer : Bukkit.getOnlinePlayers()) {
-                if (viewer.equals(owner)) continue;
-                if (!shouldHideForViewer(owner, viewer)) {
-                    PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, passengersPacket);
-                } else {
-                    // Ensure hidden in other worlds or for viewers that cannot see the owner
-                    sendDestroyToViewer(viewer, entity.getEntityIds());
-                    setLastVisibility(viewer, owner, false);
-                }
+    private void resendPassengers(Player owner, NametagEntity entity) {
+        Set<Player> tracked = owner.getTrackedBy();
+        for (Player viewer : Bukkit.getOnlinePlayers()) {
+            if (!getLastVisibility(viewer, owner)) continue;
+            if (shouldHideForViewer(owner, viewer, tracked)) {
+                hideNametagFromViewer(owner, viewer, entity, true);
+                continue;
             }
-            parentId = lineEntityId;
+            int[] mounted = passengers.refresh(viewer.getUniqueId(), entity.ownerEntityId);
+            if (mounted != null) PacketEvents.getAPI().getPlayerManager().sendPacket(viewer,
+                    new WrapperPlayServerSetPassengers(entity.ownerEntityId, mounted));
         }
     }
 
-    private boolean isGloballyHidden(Player owner) {
+    private void hideNametagFromViewer(Player owner, Player viewer, NametagEntity entity, boolean restoreMounts) {
+        int[] original = passengers.hide(viewer.getUniqueId(), entity.ownerEntityId);
+        if (restoreMounts && original != null && owner.getTrackedBy().contains(viewer) && sameWorld(owner, viewer)) {
+            PacketEvents.getAPI().getPlayerManager().sendPacket(viewer,
+                    new WrapperPlayServerSetPassengers(entity.ownerEntityId, original));
+        }
+        sendDestroyToViewer(viewer, entity.getEntityIds());
+        setLastVisibility(viewer, owner, false);
+    }
+
+    boolean isGloballyHidden(Player owner) {
         // Hide nametag when sneaking or invisible via potion/flag
         return owner.isSneaking()
                 || owner.hasPotionEffect(PotionEffectType.INVISIBILITY)
@@ -499,8 +586,15 @@ public class NametagHandler implements Listener {
     }
 
     private boolean shouldHideForViewer(Player owner, Player viewer) {
-        // Hide from viewer if not same world or viewer cannot see owner (e.g., vanished)
-        return !sameWorld(owner, viewer) || !viewer.canSee(owner);
+        return shouldHideForViewer(owner, viewer, owner.getTrackedBy());
+    }
+
+    private boolean shouldHideForViewer(Player owner, Player viewer, Set<Player> tracked) {
+        if (!owner.isOnline() || !viewer.isOnline() || owner.isDead() || owner.hasMetadata("NPC")
+                || owner.equals(viewer) || !sameWorld(owner, viewer) || !viewer.canSee(owner)
+                || !tracked.contains(viewer)) return true;
+        double distance = Math.max(1D, plugin.config.general.getInt("view_distance", 64));
+        return owner.getLocation().distanceSquared(viewer.getLocation()) > distance * distance;
     }
 
     private boolean sameWorld(Player a, Player b) {
@@ -558,25 +652,20 @@ public class NametagHandler implements Listener {
     private void sendNametagTextUpdate(Player owner, NametagEntity entity) {
         List<Integer> ids = entity.getEntityIds();
         List<Component> lines = entity.getLines();
-
-        // For each line entity, send metadata update for text (index 23)
+        List<WrapperPlayServerEntityMetadata> updates = new ArrayList<>();
         for (int i = 0; i < ids.size(); i++) {
-            int entityId = ids.get(i);
-            List<EntityData<?>> metadata = new ArrayList<>();
-            Component text = lines.get(i);
-            metadata.add(new EntityData<>(23, EntityDataTypes.ADV_COMPONENT, text));
-            WrapperPlayServerEntityMetadata metadataPacket = new WrapperPlayServerEntityMetadata(entityId, metadata);
-
-            for (Player viewer : Bukkit.getOnlinePlayers()) {
-                if (viewer.equals(owner)) continue;
-                if (!shouldHideForViewer(owner, viewer)) {
-                    PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, metadataPacket);
-                } else {
-                    // If viewer is in a different world or cannot see the owner, ensure the nametag is destroyed for them
-                    sendDestroyToViewer(viewer, ids);
-                    setLastVisibility(viewer, owner, false);
-                }
+            updates.add(new WrapperPlayServerEntityMetadata(ids.get(i),
+                    List.of(new EntityData<>(23, EntityDataTypes.ADV_COMPONENT, lines.get(i)))));
+        }
+        Set<Player> tracked = owner.getTrackedBy();
+        for (Player viewer : Bukkit.getOnlinePlayers()) {
+            if (!getLastVisibility(viewer, owner)) continue;
+            if (shouldHideForViewer(owner, viewer, tracked)) {
+                hideNametagFromViewer(owner, viewer, entity, true);
+                continue;
             }
+            for (WrapperPlayServerEntityMetadata update : updates)
+                PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, update);
         }
     }
 
@@ -592,6 +681,14 @@ public class NametagHandler implements Listener {
         // Remove this owner from all viewer caches
         clearOwnerFromVisibilityCache(player.getUniqueId());
         if (entity != null) {
+            Map<UUID, int[]> restore = passengers.removeOwner(entity.ownerEntityId);
+            for (Player viewer : Bukkit.getOnlinePlayers()) {
+                int[] original = restore.get(viewer.getUniqueId());
+                if (original != null && sameWorld(player, viewer) && player.getTrackedBy().contains(viewer)) {
+                    PacketEvents.getAPI().getPlayerManager().sendPacket(viewer,
+                            new WrapperPlayServerSetPassengers(entity.ownerEntityId, original));
+                }
+            }
             // Destroy all line entities for this player's nametag
             for (int entityId : entity.getEntityIds()) {
                 WrapperPlayServerDestroyEntities destroyPacket = new WrapperPlayServerDestroyEntities(entityId);
@@ -607,7 +704,11 @@ public class NametagHandler implements Listener {
         for (UUID uuid : new ArrayList<>(playerNametags.keySet())) {
             Player player = Bukkit.getPlayer(uuid);
             if (player == null || !player.isOnline()) {
-                playerNametags.remove(uuid);
+                NametagEntity entity = playerNametags.remove(uuid);
+                if (entity != null) {
+                    passengers.removeOwner(entity.ownerEntityId);
+                    for (Player viewer : Bukkit.getOnlinePlayers()) sendDestroyToViewer(viewer, entity.getEntityIds());
+                }
                 clearOwnerFromVisibilityCache(uuid);
             }
         }
@@ -616,11 +717,14 @@ public class NametagHandler implements Listener {
             Player viewer = Bukkit.getPlayer(viewerId);
             if (viewer == null || !viewer.isOnline()) {
                 clearViewerFromVisibilityCache(viewerId);
+                passengers.removeViewer(viewerId);
             }
         }
     }
 
     public void removeAllNametagsOnShutdown() {
+        // Restore underlying mounts before forgetting any packet overlay.
+        for (Player player : Bukkit.getOnlinePlayers()) removeNametag(player);
         for (Map.Entry<UUID, NametagEntity> entry : playerNametags.entrySet()) {
             // Destroy all line entities for each nametag
             for (int entityId : entry.getValue().getEntityIds()) {
@@ -632,6 +736,15 @@ public class NametagHandler implements Listener {
         }
         playerNametags.clear();
         viewerVisibility.clear();
+        passengers.clear();
+    }
+
+    public void shutdown() {
+        if (timer != null) timer.cancel();
+        if (hardReloadTimer != null) hardReloadTimer.cancel();
+        if (visibilityTimer != null) visibilityTimer.cancel();
+        removeAllNametagsOnShutdown();
+        PacketEvents.getAPI().getEventManager().unregisterListener(passengerListener);
     }
 
     private void reloadNametags() {
@@ -642,10 +755,12 @@ public class NametagHandler implements Listener {
     }
 
     public static class NametagEntity {
+        private final int ownerEntityId;
         private final List<Integer> entityIds; // bottom-up order
         private List<Component> lines; // bottom-up order
 
-        public NametagEntity(List<Integer> entityIds, List<Component> lines) {
+        public NametagEntity(int ownerEntityId, List<Integer> entityIds, List<Component> lines) {
+            this.ownerEntityId = ownerEntityId;
             this.entityIds = entityIds;
             this.lines = lines;
         }

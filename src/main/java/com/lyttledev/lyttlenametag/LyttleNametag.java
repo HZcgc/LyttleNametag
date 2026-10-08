@@ -65,7 +65,7 @@ public final class LyttleNametag extends JavaPlugin {
             vanillaNametagHider.shutdown();
         }
         if (nametagHandler != null) {
-            nametagHandler.removeAllNametagsOnShutdown();
+            nametagHandler.shutdown();
         }
         // PacketEvents is an external dependency and owns its own lifecycle.
     }

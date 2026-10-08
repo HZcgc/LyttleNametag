@@ -28,6 +28,8 @@
 - Built-in vanilla nametag hiding, including scoreboard re-sync for hub plugins
 - Citizens NPCs are excluded from vanilla player nametag handling
 - Uses the server's current PacketEvents installation instead of shading an outdated copy
+- Attaches each nametag line directly to the player and recreates it when the viewer starts tracking that player again
+- Preserves passenger packets from Minecraft and other plugins, with automatic attachment recovery
 
 ---
 
@@ -65,6 +67,12 @@
 3. Restart your server
 4. Edit the configuration file to customize the plugin to your needs
 5. Use `/LyttleNametag reload` to apply changes
+
+### Upgrading to 1.4.0-townyreborn.5
+Stop the server, replace the old LyttleNametag JAR with the new one, and restart.
+Keep the existing `plugins/LyttleNametag/` folder so your formatting and placeholders remain intact.
+Nametags now follow the player's tracking lifecycle, including range changes, world changes and respawns;
+failed spawns are retried automatically rather than requiring a plugin reload.
 
 ---
 

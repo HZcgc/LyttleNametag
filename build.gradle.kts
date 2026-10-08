@@ -13,11 +13,26 @@ repositories {
     maven("https://repo.codemc.io/repository/maven-releases/")
 }
 
+val mockitoAgent = configurations.create("mockitoAgent")
+
 dependencies {
     compileOnly("io.papermc.paper:paper-api:${providers.gradleProperty("paperApiVersion").get()}")
     compileOnly("com.github.retrooper:packetevents-spigot:${providers.gradleProperty("packetEventsVersion").get()}")
     compileOnly("net.luckperms:api:${providers.gradleProperty("luckPermsVersion").get()}")
     compileOnly("me.clip:placeholderapi:${providers.gradleProperty("placeholderApiVersion").get()}")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.12.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.12.2")
+    testImplementation("org.mockito:mockito-core:5.20.0")
+    mockitoAgent("org.mockito:mockito-core:5.20.0") { isTransitive = false }
+    testImplementation("io.papermc.paper:paper-api:${providers.gradleProperty("paperApiVersion").get()}")
+    testImplementation("com.github.retrooper:packetevents-spigot:${providers.gradleProperty("packetEventsVersion").get()}")
+    testImplementation("net.luckperms:api:${providers.gradleProperty("luckPermsVersion").get()}")
+    testImplementation("me.clip:placeholderapi:${providers.gradleProperty("placeholderApiVersion").get()}")
+}
+
+tasks.test {
+    useJUnitPlatform()
+    jvmArgs("-javaagent:${mockitoAgent.asPath}")
 }
 
 java {
